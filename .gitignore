@@ -1,0 +1,11 @@
+myenv/
+__pycache__/
+*.pyc
+
+checkpoints/
+*.pt
+
+MCOA_Dataset/
+AIDK_Dataset/
+
+.DS_Store
