@@ -10,6 +10,7 @@ AIDK_Dataset/
 presentation_data/
 
 unused_files/
-previous_annotators
+previous_annotators/
+unsupervised_learning/
 
 .DS_Store
