@@ -10,5 +10,6 @@ AIDK_Dataset/
 presentation_data/
 
 unused_files/
+previous_annotators
 
 .DS_Store
