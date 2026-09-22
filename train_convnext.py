@@ -50,7 +50,7 @@ MODEL_INPUT_SIZE = 224     # aspect-ratio-preserving fit + padding
 BATCH_SIZE = 16
 NUM_WORKERS = 0
 TOTAL_EPOCHS = 50
-LEARNING_RATE = 1e-5
+LEARNING_RATE = 1e-4 
 WEIGHT_DECAY = 1e-4
 MIN_VAL_LOSS_DELTA = 1e-5
 
