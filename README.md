@@ -32,7 +32,7 @@ It is recommended to use a Python virtual environment.
 ### 1. Create the virtual environment
 
 ```bash
-python3 -m venv .venv
+python3 -m venv myenv
 ```
 
 ### 2. Activate the environment
@@ -40,13 +40,13 @@ python3 -m venv .venv
 macOS/Linux:
 
 ```bash
-source .venv/bin/activate
+source myenv/bin/activate
 ```
 
 Windows:
 
 ```bash
-.venv\Scripts\activate
+myenv\Scripts\activate
 ```
 
 ### 3. Upgrade pip
@@ -80,7 +80,7 @@ python3 --version
 Run the annotation tool with:
 
 ```bash
-python3 annotate_tissue_polygon_clj_v2.py
+python3 annotate_tissue_polygon_clj.py MCOA_Normal_images
 ```
 
 The annotation workflow is:
@@ -191,7 +191,7 @@ python3 train.py /path/to/annotations --output-dir training_output
 Example:
 
 ```bash
-python3 train.py data/annotations --output-dir training_output
+python3 train_convnext.py clj_annotations_MCOA_Normal_images
 ```
 
 The output directory contains files such as:
