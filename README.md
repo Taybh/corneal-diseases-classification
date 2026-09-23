@@ -1,11 +1,11 @@
 # AS-OCT Cornea–Limbus Classification
 
-This project develops a deep-learning pipeline for localizing and classifying **corneal** and **limbal** regions in anterior-segment optical coherence tomography (**AS-OCT**) images.
+This project develops a deep-learning pipeline for localizing and classifying corneal and limbal regions in anterior-segment optical coherence tomography (AS-OCT) images.
 
 The workflow has two main parts:
 
 1. **Annotation** – manually annotate the anterior and posterior tissue boundaries and mark the left and right corneo-limbal junctions (CLJs).
-2. **Training** – generate anatomy-aware sliding-window patches from the annotated scans and fine-tune an ImageNet-pretrained **ConvNeXt-Tiny** model for binary classification:
+2. **Training** – generate anatomy-aware sliding-window patches from the annotated scans and fine-tune an ImageNet-pretrained ConvNeXt-Tiny model for binary classification:
    - `0 = limbus`
    - `1 = cornea`
 
@@ -85,12 +85,12 @@ python3 annotate_tissue_polygon_clj.py MCOA_Normal_images
 
 The annotation workflow is:
 
-1. Select points along the **anterior boundary** from left to right.
+1. Select points along the anterior boundary from left to right.
 2. Confirm the anterior boundary.
-3. Select points along the **posterior boundary**.
+3. Select points along the posterior boundary.
 4. Confirm the posterior boundary.
-5. Mark the **left CLJ**.
-6. Mark the **right CLJ**.
+5. Mark the left CLJ.
+6. Mark the right CLJ.
 7. Save the annotation.
 
 The saved JSON contains the main anatomical information required for training, including:
@@ -141,14 +141,14 @@ lower limit = posterior boundary
 
 For each patch:
 
-- the full width must lie inside the region where both anterior and posterior boundaries are annotated;
-- the patch starts 15 pixels above the anterior boundary;
-- tissue is retained down to the posterior boundary;
-- pixels below the posterior boundary are masked with zero;
-- the original geometry and curvature are preserved;
-- the patch is resized while preserving aspect ratio;
-- zero padding is added to obtain a final size of `224 × 224`;
-- the grayscale OCT patch is converted to three channels;
+- the full width must lie inside the region where both anterior and posterior boundaries are annotated.
+- the patch starts 15 pixels above the anterior boundary.
+- tissue is retained down to the posterior boundary.
+- pixels below the posterior boundary are masked with zero.
+- the original geometry and curvature are preserved.
+- the patch is resized while preserving aspect ratio.  
+- zero padding is added to obtain a final size of `224 × 224`.
+- the grayscale OCT patch is converted to three channels.
 - ImageNet normalization is applied before the patch is passed to ConvNeXt.
 
 Patch labels are determined from the annotated anterior boundary. The class occupying the majority of the patch width determines the binary patch label. In an exact 50/50 case, the label at the center of the patch is used.
@@ -157,7 +157,7 @@ Patch labels are determined from the annotated anterior boundary. The class occu
 
 ## Training
 
-The training script uses an **ImageNet-pretrained ConvNeXt-Tiny** model. The final classification layer is replaced with a two-class classifier and the **entire network is fine-tuned from the first epoch**.
+The training script uses an ImageNet-pretrained ConvNeXt-Tiny model. The final classification layer is replaced with a two-class classifier and the entire network is fine-tuned from the first epoch.
 
 Current setup:
 
@@ -171,7 +171,7 @@ weight decay = 1e-4
 early stopping = disabled
 ```
 
-The annotated OCT images are split at the **source-image level before patch generation** to avoid leakage between training and validation patches.
+The annotated OCT images are split at the source-image level before patch generation to avoid leakage between training and validation patches.
 
 For 50 annotated images:
 
