@@ -50,13 +50,24 @@ MODEL_INPUT_SIZE = 224     # aspect-ratio-preserving fit + padding
 BATCH_SIZE = 16
 NUM_WORKERS = 0
 TOTAL_EPOCHS = 50
-LEARNING_RATE = 3e-5
+LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-4
 MIN_VAL_LOSS_DELTA = 1e-5
 
-# Main augmentation: small rotation only.
-# No blur, no brightness/contrast, no vertical jitter, no flips.
-ROTATION_DEGREES = 8
+
+# ============================================================
+# Augmentation settings
+# ============================================================
+
+ROTATION_DEGREES = 35
+
+BRIGHTNESS = 0.10
+CONTRAST = 0.10
+INTENSITY_AUGMENTATION_PROBABILITY = 0.40
+
+BLUR_PROBABILITY = 0.15
+BLUR_KERNEL_SIZE = 3
+BLUR_SIGMA = (0.1, 0.8)
 
 
 # ============================================================
@@ -111,25 +122,64 @@ def log_message(message: str, log_path: Path) -> None:
 
 def create_transforms():
     """
-    The dataset itself already:
-      1. extracts a 256-pixel-wide anatomical patch,
+    The dataset already:
+      1. extracts the anatomical patch,
       2. keeps 15 px above anterior through posterior,
       3. masks invalid pixels with 0,
       4. preserves aspect ratio,
       5. pads to 224x224 with 0,
       6. converts grayscale to RGB.
 
-    Therefore transforms here only handle augmentation + tensor/normalization.
+    Augmentation is applied only to training images.
+    Validation images are not augmented.
     """
 
     train_transform = transforms.Compose(
         [
+            # ------------------------------------------------
+            # Rotation augmentation
+            # ------------------------------------------------
+            # Helps reduce dependence on absolute OCT tilt.
             transforms.RandomRotation(
                 degrees=ROTATION_DEGREES,
                 interpolation=transforms.InterpolationMode.BILINEAR,
                 fill=0,
             ),
+
+            # ------------------------------------------------
+            # Mild intensity augmentation
+            # ------------------------------------------------
+            transforms.RandomApply(
+                [
+                    transforms.ColorJitter(
+                        brightness=BRIGHTNESS,
+                        contrast=CONTRAST,
+                    )
+                ],
+                p=INTENSITY_AUGMENTATION_PROBABILITY,
+            ),
+
+            # ------------------------------------------------
+            # Mild blur augmentation
+            # ------------------------------------------------
+            transforms.RandomApply(
+                [
+                    transforms.GaussianBlur(
+                        kernel_size=BLUR_KERNEL_SIZE,
+                        sigma=BLUR_SIGMA,
+                    )
+                ],
+                p=BLUR_PROBABILITY,
+            ),
+
+            # ------------------------------------------------
+            # Convert to tensor
+            # ------------------------------------------------
             transforms.ToTensor(),
+
+            # ------------------------------------------------
+            # ImageNet normalization for pretrained ConvNeXt
+            # ------------------------------------------------
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225],
@@ -139,7 +189,9 @@ def create_transforms():
 
     validation_transform = transforms.Compose(
         [
+            # No augmentation for validation.
             transforms.ToTensor(),
+
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225],
@@ -449,8 +501,19 @@ def make_config() -> dict:
         "min_val_loss_delta": MIN_VAL_LOSS_DELTA,
         "early_stopping": False,
         "rotation_degrees": ROTATION_DEGREES,
-        "blur": False,
-        "brightness_contrast_augmentation": False,
+
+        "brightness": BRIGHTNESS,
+        "contrast": CONTRAST,
+        "intensity_augmentation_probability":
+            INTENSITY_AUGMENTATION_PROBABILITY,
+
+        "blur": True,
+        "blur_probability": BLUR_PROBABILITY,
+        "blur_kernel_size": BLUR_KERNEL_SIZE,
+        "blur_sigma": list(BLUR_SIGMA),
+
+        "brightness_contrast_augmentation": True,
+
         "vertical_jitter": False,
         "horizontal_flip": False,
         "vertical_flip": False,
