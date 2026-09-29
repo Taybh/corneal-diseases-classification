@@ -644,7 +644,7 @@ def train(
     log_message("Early stopping: disabled", log_path)
     log_message(f"Best-checkpoint min delta: {MIN_VAL_LOSS_DELTA}", log_path)
     log_message(f"Training augmentation: random rotation +/-{ROTATION_DEGREES} deg", log_path)
-    log_message("Blur / brightness-contrast / vertical jitter / flips: disabled", log_path)
+    log_message("Blur and brightness-contrast: enabled / vertical jitter and flips: disabled", log_path)
     log_message("ImageNet normalization: enabled", log_path)
     if resume_path is not None:
         log_message(f"Resuming from: {resume_path}", log_path)
