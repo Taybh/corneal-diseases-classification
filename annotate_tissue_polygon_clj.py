@@ -46,7 +46,7 @@ CONTROL_CONNECT_LINE_WIDTH = 2.0
 CONTROL_CONNECT_ALPHA = 0.8
 
 # The filled tissue band is only a display overlay; it is never written into the OCT.
-POLYGON_ALPHA = 0.30
+POLYGON_ALPHA = 0.15
 
 # The posterior boundary should cover nearly the same lateral extent as the anterior
 # boundary. This prevents us from losing most of the limbal curve merely because
