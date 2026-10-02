@@ -263,3 +263,29 @@ This helps keep the source-level split and training setup reproducible between r
 - Small rotational augmentation is used during training.
 - Neighboring-patch smoothing is not part of training and can be added later during inference.
 - The independent external test set should remain untouched until final evaluation.
+
+### Run the MCOA annotator
+
+The MCOA image and its original Label JSON are stored in the same folder. The original labled `cornea` polygon is displayed only as a visual reference; the anterior and posterior boundaries are annotated manually.
+
+```bash
+python3 annotate_tissue_polygon_clj_mcoa.py \
+    MCOA_Opaque_data \
+    --output-dir clj_annotations_MCOA_Opaque
+```
+example
+
+Annotation order:
+1. Draw the anterior boundary from left to right, then press Enter.
+2. Draw the posterior boundary from right to left, then press Enter.
+3. Select the left CLJ.
+4. Select the right CLJ.
+5. Press S to save, or N / right arrow to save and continue to the next case.
+Controls:
+- R = reset the whole current annotation.
+- B = remove the posterior boundary and redraw it while keeping the anterior boundary and CLJs.
+- Backspace / Delete = remove the last manually selected point.
+- S = save.
+- N / right arrow = save and move to the next case.
+- P / left arrow = go to the previous case.
+- Q / Esc = quit.
