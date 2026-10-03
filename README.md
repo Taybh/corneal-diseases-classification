@@ -77,7 +77,7 @@ python3 --version
 
 ## Annotation
 
-Run the annotation tool with:
+For any unannotated dataset, run the annotation tool with:
 
 ```bash
 python3 annotate_tissue_polygon_clj.py MCOA_Normal_images
