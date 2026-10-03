@@ -264,16 +264,24 @@ This helps keep the source-level split and training setup reproducible between r
 - Neighboring-patch smoothing is not part of training and can be added later during inference.
 - The independent external test set should remain untouched until final evaluation.
 
-### Run the MCOA annotator
+### Run the annotator for publicly labled datasets
 
-The MCOA image and its original Label JSON are stored in the same folder. The original labled `cornea` polygon is displayed only as a visual reference; the anterior and posterior boundaries are annotated manually.
+This annotator can be used for both **MCOA** and **AIDK** datasets.
+
+The input should be the folder containing the original Labeled JSON files. The corresponding OCT image is loaded automatically from each JSON using `imageData` or `imagePath`.
 
 ```bash
-python3 annotate_tissue_polygon_clj_mcoa.py \
+python3 annotate_tissue_polygon_clj_MCOA_AIDK.py \
+    /path/to/json_folder \
+    --output-dir /path/to/output_annotations
+```
+example
+
+```bash
+python3 annotate_tissue_polygon_clj_MCOA_AIDK.py \
     MCOA_Opaque_data \
     --output-dir clj_annotations_MCOA_Opaque
 ```
-example
 
 Annotation order:
 1. Draw the anterior boundary from left to right, then press Enter.
@@ -281,11 +289,14 @@ Annotation order:
 3. Select the left CLJ.
 4. Select the right CLJ.
 5. Press S to save, or N / right arrow to save and continue to the next case.
+
 Controls:
-- R = reset the whole current annotation.
-- B = remove the posterior boundary and redraw it while keeping the anterior boundary and CLJs.
 - Backspace / Delete = remove the last manually selected point.
+- B = remove only the posterior boundary and redraw it while keeping the anterior boundary and CLJs.
+- R = reset the whole current annotation.
 - S = save.
-- N / right arrow = save and move to the next case.
+- N / right arrow = save and continue to the next case.
 - P / left arrow = go to the previous case.
 - Q / Esc = quit.
+
+The original cornea polygon from the source JSON is shown faintly as a visual reference only. The final anterior and posterior boundaries are annotated manually, and the output JSON uses the same canonical format for both datasets.
