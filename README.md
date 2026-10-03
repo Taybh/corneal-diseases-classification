@@ -284,8 +284,8 @@ python3 annotate_tissue_polygon_clj_MCOA_AIDK.py \
 ```
 
 Annotation order:
-1. Draw the anterior boundary from left to right, then press Enter.
-2. Draw the posterior boundary from right to left, then press Enter.
+1. Select points along the anterior boundary, then press `Enter`.
+2. Select points along the posterior boundary, then press `Enter`.
 3. Select the left CLJ.
 4. Select the right CLJ.
 5. Press S to save, or N / right arrow to save and continue to the next case.
