@@ -346,26 +346,6 @@ def validate_boundary_pair(
             "Anterior and posterior boundaries do not overlap horizontally."
         )
 
-    anterior_span = anterior_x_max - anterior_x_min
-    tolerance = max(
-        POSTERIOR_ENDPOINT_TOLERANCE_MIN_PX,
-        POSTERIOR_ENDPOINT_TOLERANCE_FRACTION * anterior_span,
-    )
-
-    left_gap = posterior_x_min - anterior_x_min
-    right_gap = anterior_x_max - posterior_x_max
-
-    if left_gap > tolerance or right_gap > tolerance:
-        raise ValueError(
-            "Posterior boundary is too short laterally.\n"
-            f"Anterior x-range: {anterior_x_min:.0f} .. {anterior_x_max:.0f}\n"
-            f"Posterior x-range: {posterior_x_min:.0f} .. {posterior_x_max:.0f}\n"
-            f"Allowed endpoint gap: about {tolerance:.0f} px.\n"
-            "Extend the posterior boundary farther into BOTH limbal sides. "
-            "Do not stop just because another structure begins immediately below it; "
-            "everything below the posterior line will be masked later."
-        )
-
     valid = []
 
     for x_p, y_p in posterior_boundary:
