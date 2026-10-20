@@ -11,8 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backend_bases import MouseButton
 from PIL import Image
-from scipy.interpolate import UnivariateSpline
-from scipy.signal import savgol_filter
+from scipy.interpolate import PchipInterpolator
 
 
 LEFT_LABEL = "left_CLJ"
@@ -213,71 +212,75 @@ def smooth_dense_boundary(y: np.ndarray) -> np.ndarray:
             window = len(y) - 1 if len(y) % 2 == 0 else len(y)
         if window % 2 == 0:
             window -= 1
-        y = savgol_filter(
-            y,
-            window_length=window,
-            polyorder=min(3, window - 1),
-        )
+        #y = savgol_filter(
+        #    y,
+        #    window_length=window,
+        #    polyorder=min(3, window - 1),
+        #)
     return y
 
 
 def fit_boundary(
     control_points: list[tuple[float, float]],
 ) -> tuple[np.ndarray, np.ndarray]:
+
     if len(control_points) < MIN_BOUNDARY_POINTS:
         raise ValueError(
             f"Please select at least {MIN_BOUNDARY_POINTS} boundary points."
         )
 
-    points = np.asarray(control_points, dtype=np.float64)
-    points = points[np.isfinite(points).all(axis=1)]
+    points = np.asarray(
+        control_points,
+        dtype=np.float64,
+    )
+
+    points = points[
+        np.isfinite(points).all(axis=1)
+    ]
+
     if len(points) < MIN_BOUNDARY_POINTS:
         raise ValueError("Not enough valid boundary points.")
 
-    points = points[np.argsort(points[:, 0])]
-    x = points[:, 0]
-    y = points[:, 1]
+    # IMPORTANT:
+    # Preserve the exact order in which the annotator clicked the points.
+    # Do NOT sort by x.
 
-    rounded_x = np.round(x).astype(int)
-    collapsed_x = []
-    collapsed_y = []
-    for x_value in np.unique(rounded_x):
-        mask = rounded_x == x_value
-        collapsed_x.append(float(np.mean(x[mask])))
-        collapsed_y.append(float(np.median(y[mask])))
+    dense_segments = []
 
-    x = np.asarray(collapsed_x, dtype=np.float64)
-    y = np.asarray(collapsed_y, dtype=np.float64)
+    for i in range(len(points) - 1):
 
-    if len(x) < MIN_BOUNDARY_POINTS:
-        raise ValueError(
-            "Too few unique x coordinates remain after removing duplicate x positions."
+        p0 = points[i]
+        p1 = points[i + 1]
+
+        distance = np.linalg.norm(p1 - p0)
+
+        n_samples = max(
+            2,
+            int(np.ceil(distance / BOUNDARY_X_STEP)) + 1,
         )
-    if not np.all(np.diff(x) > 0):
-        raise ValueError("Boundary x coordinates are not strictly increasing.")
 
-    spline = UnivariateSpline(
-        x,
-        y,
-        s=SPLINE_SMOOTHING,
-        k=min(3, len(x) - 1),
+        t = np.linspace(
+            0.0,
+            1.0,
+            n_samples,
+            endpoint=False,
+        )
+
+        segment = (
+            p0[None, :]
+            + t[:, None] * (p1 - p0)[None, :]
+        )
+
+        dense_segments.append(segment)
+
+    # Add final clicked point.
+    dense_segments.append(
+        points[-1][None, :]
     )
 
-    x_min = float(np.ceil(x.min()))
-    x_max = float(np.floor(x.max()))
-    if x_max <= x_min:
-        raise ValueError("Boundary has insufficient horizontal extent.")
+    boundary = np.vstack(dense_segments)
 
-    dense_x = np.arange(
-        x_min,
-        x_max + BOUNDARY_X_STEP,
-        BOUNDARY_X_STEP,
-        dtype=np.float64,
-    )
-    dense_y = smooth_dense_boundary(spline(dense_x))
-    boundary = np.column_stack((dense_x, dense_y))
-    sorted_control_points = np.column_stack((x, y))
-    return boundary, sorted_control_points
+    return boundary, points.copy()
 
 
 def closest_boundary_index(
@@ -363,23 +366,27 @@ def validate_boundary_pair(
             "everything below the posterior line will be masked later."
         )
 
-    xs = np.arange(np.ceil(x_min), np.floor(x_max) + 1, dtype=np.float64)
-    if len(xs) == 0:
-        return
+    valid = []
 
-    anterior_y = np.interp(
-        xs, anterior_boundary[:, 0], anterior_boundary[:, 1]
-    )
-    posterior_y = np.interp(
-        xs, posterior_boundary[:, 0], posterior_boundary[:, 1]
-    )
-    correct_fraction = float(np.mean(posterior_y >= anterior_y))
+    for x_p, y_p in posterior_boundary:
+        if anterior_x_min <= x_p <= anterior_x_max:
+            idx = np.argmin(
+                np.abs(anterior_boundary[:, 0] - x_p)
+            )
 
-    if correct_fraction < 0.98:
-        raise ValueError(
-            "Posterior boundary crosses above the anterior boundary in too many "
-            f"columns ({correct_fraction:.1%} correctly ordered). Please correct it."
-        )
+            y_a = anterior_boundary[idx, 1]
+
+            valid.append(y_p >= y_a)
+
+    if valid:
+        correct_fraction = float(np.mean(valid))
+
+        if correct_fraction < 0.98:
+            raise ValueError(
+                "Posterior boundary crosses above the anterior boundary in too many "
+                f"locations ({correct_fraction:.1%} correctly ordered). "
+                "Please correct it."
+            )
 
 
 class LabelMeManualPolygonCLJAnnotator:
