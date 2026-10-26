@@ -343,7 +343,7 @@ def read_boundary_annotation(
     """
     Returns:
         anterior_boundary: (N, 2), sorted left->right
-        posterior_boundary: (M, 2), sorted left->right
+        posterior_boundary: (M, 2), preserved in the exact saved/click order
         anterior_region_labels: (N,)
     """
 
@@ -381,9 +381,9 @@ def read_boundary_annotation(
     anterior = anterior[anterior_order]
     region_labels = region_labels[anterior_order]
 
-    posterior_order = np.argsort(posterior[:, 0])
-    posterior = posterior[posterior_order]
-
+    # IMPORTANT: do not sort the posterior by x.  The annotator stores this
+    # boundary as an ordered 2-D polyline, and some anatomically valid parts
+    # can locally move backward in x.  Re-sorting would destroy that shape.
     return anterior, posterior, region_labels
 
 
@@ -402,6 +402,86 @@ def _unique_xy_for_interpolation(boundary: np.ndarray) -> tuple[np.ndarray, np.n
 
     unique_y = y_sum / counts
     return unique_x, unique_y
+
+
+def _posterior_y_from_ordered_polyline(
+    posterior_boundary: np.ndarray,
+    x_columns: np.ndarray,
+) -> np.ndarray | None:
+    """
+    Evaluate the posterior lower boundary at integer image columns while
+    preserving the exact point order stored by the annotator.
+
+    Unlike np.interp(), this does NOT assume that x is monotonic.  Every
+    consecutive pair of posterior points is treated as one 2-D line segment,
+    so a segment is allowed to move either rightward or leftward in x.
+
+    If a vertical image column intersects the ordered polyline more than once
+    (possible when the contour locally doubles back in x), the deepest
+    intersection is used.  Image y increases downward, so this is the maximum
+    y-value and therefore the appropriate hard lower mask boundary.
+
+    Returns None if any requested column has no posterior intersection; no
+    extrapolation beyond the annotated polyline is performed.
+    """
+
+    if posterior_boundary.ndim != 2 or posterior_boundary.shape[1] != 2:
+        raise ValueError("posterior_boundary must have shape (N, 2).")
+    if len(posterior_boundary) < 2:
+        return None
+
+    xs = np.asarray(x_columns, dtype=np.float64)
+    if xs.ndim != 1 or len(xs) == 0:
+        return None
+
+    candidates: list[list[float]] = [[] for _ in range(len(xs))]
+    first_x = float(xs[0])
+    last_x = float(xs[-1])
+    eps = 1e-9
+
+    for p0, p1 in zip(posterior_boundary[:-1], posterior_boundary[1:]):
+        x0, y0 = float(p0[0]), float(p0[1])
+        x1, y1 = float(p1[0]), float(p1[1])
+
+        if not np.isfinite([x0, y0, x1, y1]).all():
+            continue
+
+        # Vertical posterior segment.  It intersects only the matching image
+        # column; retain its deepest point for the lower boundary.
+        if abs(x1 - x0) <= eps:
+            xi = int(round(x0))
+            if abs(float(xi) - x0) <= 0.5 + eps and first_x <= xi <= last_x:
+                index = xi - int(round(first_x))
+                if 0 <= index < len(candidates):
+                    candidates[index].append(max(y0, y1))
+            continue
+
+        seg_min_x = min(x0, x1)
+        seg_max_x = max(x0, x1)
+        start_x = max(int(np.ceil(seg_min_x - eps)), int(np.ceil(first_x)))
+        end_x = min(int(np.floor(seg_max_x + eps)), int(np.floor(last_x)))
+
+        if end_x < start_x:
+            continue
+
+        for xi in range(start_x, end_x + 1):
+            t = (float(xi) - x0) / (x1 - x0)
+            if t < -eps or t > 1.0 + eps:
+                continue
+            y = y0 + t * (y1 - y0)
+            index = xi - int(round(first_x))
+            if 0 <= index < len(candidates):
+                candidates[index].append(float(y))
+
+    posterior_y = np.full(len(xs), np.nan, dtype=np.float64)
+    for index, values in enumerate(candidates):
+        if values:
+            posterior_y[index] = max(values)
+
+    if np.isnan(posterior_y).any():
+        return None
+
+    return posterior_y
 
 
 # ============================================================
@@ -499,8 +579,9 @@ def extract_anatomical_patch(
     Everything outside that band is set to mask_value. There is no
     bottom margin below the posterior boundary.
 
-    The caller must ensure the full horizontal patch lies inside the
-    x-overlap of the annotated anterior and posterior boundaries.
+    The anterior is evaluated left-to-right. The posterior is evaluated as
+    the ordered 2-D polyline saved by the annotator, so local backward movement
+    in x is allowed. No boundary extrapolation is performed.
     """
 
     if image.ndim != 2:
@@ -512,22 +593,29 @@ def extract_anatomical_patch(
     if patch_left < 0 or patch_right > image_width:
         return None
 
+    # The anterior boundary is intentionally treated as y=f(x) because its
+    # region labels are defined left-to-right.
     anterior_x, anterior_y_values = _unique_xy_for_interpolation(anterior_boundary)
-    posterior_x, posterior_y_values = _unique_xy_for_interpolation(posterior_boundary)
 
     global_x = np.arange(patch_left, patch_right, dtype=np.float64)
 
-    # No boundary extrapolation is allowed.
+    # No anterior extrapolation is allowed.
     if (
         global_x[0] < anterior_x.min()
         or global_x[-1] > anterior_x.max()
-        or global_x[0] < posterior_x.min()
-        or global_x[-1] > posterior_x.max()
     ):
         return None
 
     anterior_y = np.interp(global_x, anterior_x, anterior_y_values)
-    posterior_y = np.interp(global_x, posterior_x, posterior_y_values)
+
+    # The posterior is an ordered 2-D polyline, not necessarily y=f(x).
+    # Preserve annotation order and evaluate segment/column intersections.
+    posterior_y = _posterior_y_from_ordered_polyline(
+        posterior_boundary=posterior_boundary,
+        x_columns=global_x,
+    )
+    if posterior_y is None:
+        return None
 
     # Anatomically invalid annotation/crossing.
     if np.any(posterior_y < anterior_y):
