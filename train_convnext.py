@@ -44,6 +44,17 @@ MODEL_INPUT_SIZE = 224     # aspect-ratio-preserving fit + padding
 
 
 # ============================================================
+# Training/validation annotation folders
+# ============================================================
+
+TRAINING_ANNOTATION_DIRS = [
+    Path("clj_annotations_AIDK_Partial_Frame"),
+    Path("clj_annotations_MCOA_Normal_images"),
+    Path("clj_annotations_MCOA_Opaque"),
+]
+
+
+# ============================================================
 # Training settings
 # ============================================================
 
@@ -206,8 +217,21 @@ def create_transforms():
 # Dataset creation
 # ============================================================
 
-def create_datasets(input_paths: list[Path]):
-    json_files = collect_region_json_files(input_paths)
+def create_datasets():
+    # Combine all three annotation folders into one source-level pool.
+    # Identical filenames across folders are safe because build_source_cases()
+    # identifies sources from their full resolved paths.
+    missing_dirs = [path for path in TRAINING_ANNOTATION_DIRS if not path.exists()]
+    if missing_dirs:
+        missing = "\n".join(f"  - {path}" for path in missing_dirs)
+        raise FileNotFoundError(
+            "The following training/validation annotation folders were not found:\n"
+            f"{missing}\n"
+            "Run this script from the project directory that contains these folders, "
+            "or change TRAINING_ANNOTATION_DIRS to the correct paths."
+        )
+
+    json_files = collect_region_json_files(TRAINING_ANNOTATION_DIRS)
     cases = build_source_cases(json_files)
 
     if len(cases) < 2:
@@ -484,6 +508,7 @@ def make_config() -> dict:
     return {
         "seed": SEED,
         "train_fraction": TRAIN_FRACTION,
+        "training_annotation_dirs": [str(path) for path in TRAINING_ANNOTATION_DIRS],
         "patch_width": PATCH_WIDTH,
         "patch_step": PATCH_STEP,
         "margin_above_anterior": MARGIN_ABOVE_ANTERIOR,
@@ -551,7 +576,6 @@ def save_checkpoint(
 # ============================================================
 
 def train(
-    input_paths: list[Path],
     output_dir: Path,
     resume_path: Path | None = None,
 ) -> None:
@@ -571,7 +595,7 @@ def train(
 
     device = get_device()
 
-    train_dataset, validation_dataset, splits, all_cases = create_datasets(input_paths)
+    train_dataset, validation_dataset, splits, all_cases = create_datasets()
     train_loader, validation_loader = create_loaders(
         train_dataset,
         validation_dataset,
@@ -609,6 +633,9 @@ def train(
     log_message("=" * 72, log_path)
     log_message(f"Device: {device}", log_path)
     log_message(f"Complete annotated source images found: {len(all_cases)}", log_path)
+    log_message("Training/validation annotation folders:", log_path)
+    for annotation_dir in TRAINING_ANNOTATION_DIRS:
+        log_message(f"  - {annotation_dir.resolve()}", log_path)
     log_message(f"Train source images: {len(splits['train'])}", log_path)
     log_message(f"Validation source images: {len(splits['validation'])}", log_path)
     log_message("Internal test split: none (external test set kept separate)", log_path)
@@ -809,13 +836,6 @@ def parse_args():
     )
 
     parser.add_argument(
-        "inputs",
-        nargs="+",
-        type=Path,
-        help="Annotation JSON file(s) and/or folders searched recursively.",
-    )
-
-    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("training_convnext_output"),
@@ -838,7 +858,6 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     train(
-        input_paths=args.inputs,
         output_dir=args.output_dir,
         resume_path=args.resume,
     )
