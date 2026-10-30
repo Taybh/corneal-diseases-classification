@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backend_bases import MouseButton
 from PIL import Image
-from scipy.interpolate import UnivariateSpline
-from scipy.signal import savgol_filter
 
 
 LEFT_LABEL = "left_CLJ"
@@ -37,7 +35,7 @@ POLYGON_FILL_COLOR = "tab:blue"
 CONTROL_POINT_SIZE = 25
 CLJ_POINT_SIZE = 70
 
-# Thin final fitted lines make CLJ placement more precise.
+# Thin final boundary lines make CLJ placement more precise.
 BOUNDARY_LINE_WIDTH = 0.8
 REGION_LINE_WIDTH = 1.0
 
@@ -48,14 +46,8 @@ CONTROL_CONNECT_ALPHA = 0.8
 # The filled tissue band is only a display overlay; it is never written into the OCT.
 POLYGON_ALPHA = 0.15
 
-# The posterior boundary should cover nearly the same lateral extent as the anterior
-# boundary. This prevents us from losing most of the limbal curve merely because
-# deeper angle/iris structures begin immediately below the posterior surface.
-POSTERIOR_ENDPOINT_TOLERANCE_FRACTION = 0.05
-POSTERIOR_ENDPOINT_TOLERANCE_MIN_PX = 75.0
 
 BOUNDARY_X_STEP = 1.0
-SPLINE_SMOOTHING = 0.0
 MIN_BOUNDARY_POINTS = 4
 
 IMAGE_EXTENSIONS = {
@@ -88,26 +80,20 @@ def collect_images(paths: list[Path]) -> list[Path]:
     return image_paths
 
 
-def smooth_dense_boundary(y: np.ndarray) -> np.ndarray:
-    y = np.asarray(y, dtype=np.float64)
-    if len(y) >= 7:
-        window = min(101, len(y) if len(y) % 2 else len(y) - 1)
-        window = max(7, window)
-        if window >= len(y):
-            window = len(y) - 1 if len(y) % 2 == 0 else len(y)
-        if window % 2 == 0:
-            window -= 1
-        y = savgol_filter(
-            y,
-            window_length=window,
-            polyorder=min(3, window - 1),
-        )
-    return y
-
-
 def fit_boundary(
     control_points: list[tuple[float, float]],
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Build a dense piecewise-linear boundary in the EXACT order in which
+    the annotator clicked the control points.
+
+    Important:
+    - No sorting by x.
+    - No spline interpolation.
+    - No smoothing.
+    - Local backward movement in x is allowed.
+    - Sharp anatomical direction changes are preserved.
+    """
     if len(control_points) < MIN_BOUNDARY_POINTS:
         raise ValueError(
             f"Please select at least {MIN_BOUNDARY_POINTS} boundary points."
@@ -115,54 +101,38 @@ def fit_boundary(
 
     points = np.asarray(control_points, dtype=np.float64)
     points = points[np.isfinite(points).all(axis=1)]
+
     if len(points) < MIN_BOUNDARY_POINTS:
         raise ValueError("Not enough valid boundary points.")
 
-    points = points[np.argsort(points[:, 0])]
-    x = points[:, 0]
-    y = points[:, 1]
+    dense_segments: list[np.ndarray] = []
 
-    rounded_x = np.round(x).astype(int)
-    collapsed_x = []
-    collapsed_y = []
-    for x_value in np.unique(rounded_x):
-        mask = rounded_x == x_value
-        collapsed_x.append(float(np.mean(x[mask])))
-        collapsed_y.append(float(np.median(y[mask])))
-
-    x = np.asarray(collapsed_x, dtype=np.float64)
-    y = np.asarray(collapsed_y, dtype=np.float64)
-
-    if len(x) < MIN_BOUNDARY_POINTS:
-        raise ValueError(
-            "Too few unique x coordinates remain after removing duplicate x positions."
+    for index in range(len(points) - 1):
+        p0 = points[index]
+        p1 = points[index + 1]
+        distance = float(np.linalg.norm(p1 - p0))
+        n_samples = max(
+            2,
+            int(np.ceil(distance / BOUNDARY_X_STEP)) + 1,
         )
-    if not np.all(np.diff(x) > 0):
-        raise ValueError("Boundary x coordinates are not strictly increasing.")
+        t = np.linspace(
+            0.0,
+            1.0,
+            n_samples,
+            endpoint=False,
+            dtype=np.float64,
+        )
+        segment = p0[None, :] + t[:, None] * (p1 - p0)[None, :]
+        dense_segments.append(segment)
 
-    spline = UnivariateSpline(
-        x,
-        y,
-        s=SPLINE_SMOOTHING,
-        k=min(3, len(x) - 1),
-    )
+    dense_segments.append(points[-1][None, :])
+    boundary = np.vstack(dense_segments)
 
-    x_min = float(np.ceil(x.min()))
-    x_max = float(np.floor(x.max()))
-    if x_max <= x_min:
-        raise ValueError("Boundary has insufficient horizontal extent.")
+    if len(boundary) < 2:
+        raise ValueError("Boundary has insufficient extent.")
 
-    dense_x = np.arange(
-        x_min,
-        x_max + BOUNDARY_X_STEP,
-        BOUNDARY_X_STEP,
-        dtype=np.float64,
-    )
-    dense_y = smooth_dense_boundary(spline(dense_x))
-    boundary = np.column_stack((dense_x, dense_y))
-    sorted_control_points = np.column_stack((x, y))
-    return boundary, sorted_control_points
-
+    ordered_control_points = points.copy()
+    return boundary, ordered_control_points
 
 def closest_boundary_index(
     boundary: np.ndarray,
@@ -205,19 +175,23 @@ def validate_boundary_pair(
     posterior_boundary: np.ndarray,
 ) -> None:
     """
-    Validate the two fitted curves.
+    Basic anatomical validation.
 
-    For this project the posterior boundary has TWO roles:
-    1. anatomical posterior tissue boundary;
-    2. hard lower masking boundary (zero pixels are kept below it).
+    The posterior boundary is allowed to stop wherever the annotator decides
+    the visible posterior tissue boundary ends, and it may locally move
+    backward in x.
 
-    Therefore it should extend laterally almost as far as the anterior boundary,
-    rather than stopping merely because iris/angle structures begin underneath.
+    We therefore do NOT require the posterior to match the full lateral
+    extent of the anterior boundary, and we do NOT treat the posterior as
+    a single-valued function y=f(x).
     """
-    anterior_x_min = float(anterior_boundary[:, 0].min())
-    anterior_x_max = float(anterior_boundary[:, 0].max())
-    posterior_x_min = float(posterior_boundary[:, 0].min())
-    posterior_x_max = float(posterior_boundary[:, 0].max())
+    if len(anterior_boundary) < 2 or len(posterior_boundary) < 2:
+        raise ValueError("Anterior and posterior boundaries need at least 2 points.")
+
+    anterior_x_min = float(np.min(anterior_boundary[:, 0]))
+    anterior_x_max = float(np.max(anterior_boundary[:, 0]))
+    posterior_x_min = float(np.min(posterior_boundary[:, 0]))
+    posterior_x_max = float(np.max(posterior_boundary[:, 0]))
 
     x_min = max(anterior_x_min, posterior_x_min)
     x_max = min(anterior_x_max, posterior_x_max)
@@ -227,42 +201,27 @@ def validate_boundary_pair(
             "Anterior and posterior boundaries do not overlap horizontally."
         )
 
-    anterior_span = anterior_x_max - anterior_x_min
-    tolerance = max(
-        POSTERIOR_ENDPOINT_TOLERANCE_MIN_PX,
-        POSTERIOR_ENDPOINT_TOLERANCE_FRACTION * anterior_span,
-    )
+    valid_ordering: list[bool] = []
 
-    left_gap = posterior_x_min - anterior_x_min
-    right_gap = anterior_x_max - posterior_x_max
+    for x_p, y_p in posterior_boundary:
+        if anterior_x_min <= x_p <= anterior_x_max:
+            nearest_index = int(
+                np.argmin(np.abs(anterior_boundary[:, 0] - x_p))
+            )
+            y_a = float(anterior_boundary[nearest_index, 1])
+            valid_ordering.append(bool(y_p >= y_a))
 
-    if left_gap > tolerance or right_gap > tolerance:
+    if not valid_ordering:
         raise ValueError(
-            "Posterior boundary is too short laterally.\n"
-            f"Anterior x-range: {anterior_x_min:.0f} .. {anterior_x_max:.0f}\n"
-            f"Posterior x-range: {posterior_x_min:.0f} .. {posterior_x_max:.0f}\n"
-            f"Allowed endpoint gap: about {tolerance:.0f} px.\n"
-            "Extend the posterior boundary farther into BOTH limbal sides. "
-            "Do not stop just because another structure begins immediately below it; "
-            "everything below the posterior line will be masked later."
+            "Anterior and posterior boundaries do not have enough comparable overlap."
         )
 
-    xs = np.arange(np.ceil(x_min), np.floor(x_max) + 1, dtype=np.float64)
-    if len(xs) == 0:
-        return
-
-    anterior_y = np.interp(
-        xs, anterior_boundary[:, 0], anterior_boundary[:, 1]
-    )
-    posterior_y = np.interp(
-        xs, posterior_boundary[:, 0], posterior_boundary[:, 1]
-    )
-    correct_fraction = float(np.mean(posterior_y >= anterior_y))
+    correct_fraction = float(np.mean(valid_ordering))
 
     if correct_fraction < 0.98:
         raise ValueError(
             "Posterior boundary crosses above the anterior boundary in too many "
-            f"columns ({correct_fraction:.1%} correctly ordered). Please correct it."
+            f"locations ({correct_fraction:.1%} correctly ordered). Please correct it."
         )
 
 
@@ -276,11 +235,11 @@ class ImageOnlyPolygonCLJAnnotator:
         self.image: np.ndarray | None = None
 
         self.anterior_control_points: list[tuple[float, float]] = []
-        self.anterior_sorted_control_points: np.ndarray | None = None
+        self.anterior_ordered_control_points: np.ndarray | None = None
         self.anterior_boundary: np.ndarray | None = None
 
         self.posterior_control_points: list[tuple[float, float]] = []
-        self.posterior_sorted_control_points: np.ndarray | None = None
+        self.posterior_ordered_control_points: np.ndarray | None = None
         self.posterior_boundary: np.ndarray | None = None
 
         self.left_clj_index: int | None = None
@@ -308,11 +267,11 @@ class ImageOnlyPolygonCLJAnnotator:
         self.image = load_image(self.current_image_path)
 
         self.anterior_control_points = []
-        self.anterior_sorted_control_points = None
+        self.anterior_ordered_control_points = None
         self.anterior_boundary = None
 
         self.posterior_control_points = []
-        self.posterior_sorted_control_points = None
+        self.posterior_ordered_control_points = None
         self.posterior_boundary = None
 
         self.left_clj_index = None
@@ -374,8 +333,8 @@ class ImageOnlyPolygonCLJAnnotator:
                 self.mode = "posterior_points"
                 print("\nExisting anterior-only annotation found.")
                 print("Anterior boundary and existing CLJs were preserved.")
-                print("Please add the POSTERIOR boundary from RIGHT to LEFT.")
-                print("Extend it laterally almost as far as the anterior boundary.")
+                print("Please add the POSTERIOR boundary in anatomical sequence.")
+                print("Stop wherever the visible posterior boundary ends.")
                 print("Everything immediately below it will be masked later.")
 
             print(f"Loaded existing annotation: {self.output_path.name}")
@@ -470,7 +429,7 @@ class ImageOnlyPolygonCLJAnnotator:
             try:
                 (
                     self.anterior_boundary,
-                    self.anterior_sorted_control_points,
+                    self.anterior_ordered_control_points,
                 ) = fit_boundary(self.anterior_control_points)
 
                 self.left_clj_index = None
@@ -481,9 +440,9 @@ class ImageOnlyPolygonCLJAnnotator:
                 print("Anterior boundary fitted.")
                 print(f"Manual points: {len(self.anterior_control_points)}")
                 print(f"Dense anterior points: {len(self.anterior_boundary)}")
-                print("\nNow click the POSTERIOR boundary from RIGHT to LEFT.")
-                print("Extend it laterally almost as far as the anterior boundary.")
-                print("Do NOT stop because iris/angle structures begin below it.")
+                print("\nNow click the POSTERIOR boundary in anatomical sequence.")
+                print("Stop wherever the visible posterior boundary ends.")
+                print("The clicked order is preserved exactly, including local backward x movement.")
                 print("The posterior curve is the HARD LOWER MASK boundary:")
                 print("everything immediately below it will be removed later.")
                 print("Press ENTER when finished.")
@@ -500,7 +459,7 @@ class ImageOnlyPolygonCLJAnnotator:
             try:
                 (
                     self.posterior_boundary,
-                    self.posterior_sorted_control_points,
+                    self.posterior_ordered_control_points,
                 ) = fit_boundary(self.posterior_control_points)
 
                 if self.anterior_boundary is None:
@@ -571,11 +530,11 @@ class ImageOnlyPolygonCLJAnnotator:
 
     def reset(self) -> None:
         self.anterior_control_points = []
-        self.anterior_sorted_control_points = None
+        self.anterior_ordered_control_points = None
         self.anterior_boundary = None
 
         self.posterior_control_points = []
-        self.posterior_sorted_control_points = None
+        self.posterior_ordered_control_points = None
         self.posterior_boundary = None
 
         self.left_clj_index = None
@@ -583,7 +542,7 @@ class ImageOnlyPolygonCLJAnnotator:
         self.mode = "anterior_points"
 
         print("\nAnnotation reset.")
-        print("Start again with the ANTERIOR boundary from LEFT to RIGHT.")
+        print("Start again with the ANTERIOR boundary in anatomical sequence.")
         self.draw()
 
     def save(self) -> bool:
@@ -684,13 +643,13 @@ class ImageOnlyPolygonCLJAnnotator:
             return
 
         self.posterior_control_points = []
-        self.posterior_sorted_control_points = None
+        self.posterior_ordered_control_points = None
         self.posterior_boundary = None
         self.mode = "posterior_points"
 
         print("\nPosterior boundary cleared; anterior boundary and CLJs were preserved.")
-        print("Redraw POSTERIOR boundary RIGHT -> LEFT.")
-        print("Extend it laterally almost as far as the anterior boundary.")
+        print("Redraw POSTERIOR boundary in anatomical sequence.")
+        print("Stop wherever the visible posterior boundary ends.")
         print("Everything immediately below it will be masked later.")
         self.draw()
 
@@ -817,7 +776,7 @@ class ImageOnlyPolygonCLJAnnotator:
                     color=ANTERIOR_BOUNDARY_COLOR,
                     linewidth=BOUNDARY_LINE_WIDTH,
                     alpha=0.85,
-                    label="Fitted anterior boundary",
+                    label="Anterior boundary",
                     zorder=8,
                 )
 
@@ -828,7 +787,7 @@ class ImageOnlyPolygonCLJAnnotator:
                 color=POSTERIOR_BOUNDARY_COLOR,
                 linewidth=BOUNDARY_LINE_WIDTH,
                 alpha=0.85,
-                label="Fitted posterior boundary",
+                label="Posterior boundary",
                 zorder=8,
             )
 
@@ -882,7 +841,7 @@ class ImageOnlyPolygonCLJAnnotator:
             )
         elif self.mode == "posterior_points":
             instruction = (
-                f"STEP 2: click POSTERIOR RIGHT→LEFT, nearly full anterior x-range "
+                f"STEP 2: click POSTERIOR in anatomical sequence "
                 f"({len(self.posterior_control_points)} points). ENTER=fit."
             )
         elif self.mode == "left_clj":
@@ -926,10 +885,10 @@ class ImageOnlyPolygonCLJAnnotator:
         print("\n================================================")
         print("Image-only tissue polygon + CLJ annotator")
         print("================================================\n")
-        print("STEP 1: click ANTERIOR boundary LEFT -> RIGHT, then Enter.")
-        print("STEP 2: click POSTERIOR boundary RIGHT -> LEFT, then Enter.")
-        print("        Extend it almost to the same lateral x-range as the anterior.")
-        print("        Do NOT stop because deeper structures start underneath.")
+        print("STEP 1: click ANTERIOR boundary in anatomical sequence, then Enter.")
+        print("STEP 2: click POSTERIOR boundary in anatomical sequence, then Enter.")
+        print("        Stop wherever the visible posterior boundary ends.")
+        print("        Click order is preserved exactly; local backward x movement is allowed.")
         print("        Everything immediately below posterior will be masked later.")
         print("STEP 3: inspect YELLOW anterior + CYAN posterior.")
         print("STEP 4: click LEFT CLJ, then RIGHT CLJ on the anterior boundary.\n")
