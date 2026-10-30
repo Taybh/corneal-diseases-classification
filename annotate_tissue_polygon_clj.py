@@ -44,7 +44,7 @@ CONTROL_CONNECT_LINE_WIDTH = 2.0
 CONTROL_CONNECT_ALPHA = 0.8
 
 # The filled tissue band is only a display overlay; it is never written into the OCT.
-POLYGON_ALPHA = 0.15
+POLYGON_ALPHA = 0.0
 
 
 BOUNDARY_X_STEP = 1.0
