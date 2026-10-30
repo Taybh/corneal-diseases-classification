@@ -27,7 +27,8 @@ from oct_patch_dataset import (
 # Reproducibility
 # ============================================================
 
-SEED = 42
+TRAIN_SEED = 42
+SPLIT_SEED = 42       # change this please to: 42, 43, 44, 45, 46
 
 
 # ============================================================
@@ -242,7 +243,7 @@ def create_datasets():
     splits = split_cases(
         cases=cases,
         train_fraction=TRAIN_FRACTION,
-        seed=SEED,
+        seed=SPLIT_SEED,
     )
 
     train_transform, validation_transform = create_transforms()
@@ -286,7 +287,7 @@ def create_datasets():
 def create_loaders(train_dataset, validation_dataset):
     # Generator makes train shuffling reproducible.
     generator = torch.Generator()
-    generator.manual_seed(SEED)
+    generator.manual_seed(TRAIN_SEED)
 
     train_loader = DataLoader(
         train_dataset,
@@ -506,7 +507,8 @@ def save_splits(splits: dict[str, list[SourceCase]], output_path: Path) -> None:
 
 def make_config() -> dict:
     return {
-        "seed": SEED,
+        "train_seed": TRAIN_SEED,
+        "split_seed": SPLIT_SEED,
         "train_fraction": TRAIN_FRACTION,
         "training_annotation_dirs": [str(path) for path in TRAINING_ANNOTATION_DIRS],
         "patch_width": PATCH_WIDTH,
@@ -579,7 +581,7 @@ def train(
     output_dir: Path,
     resume_path: Path | None = None,
 ) -> None:
-    set_seed(SEED)
+    set_seed(TRAIN_SEED)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = output_dir / "log.txt"
@@ -838,7 +840,7 @@ def parse_args():
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(f"training_convnext_output_seed{SEED}"),
+        default=Path(f"training_convnext_output_split_seed{SPLIT_SEED}"),
         help="Folder for logs, checkpoints, split metadata, and history.",
     )
 
