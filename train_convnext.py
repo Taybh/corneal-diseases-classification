@@ -838,7 +838,7 @@ def parse_args():
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("training_convnext_output"),
+        default=Path(f"training_convnext_output_seed{SEED}"),
         help="Folder for logs, checkpoints, split metadata, and history.",
     )
 
