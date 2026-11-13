@@ -5,7 +5,7 @@ __pycache__/
 checkpoints/
 *.pt
 
-MCOA_Dataset/
+MCOA_ Dataset/
 presentation_data/
 AIDK_Dataset/Full-frame_Dataset/
 
